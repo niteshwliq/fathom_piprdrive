@@ -1,0 +1,230 @@
+import os
+import csv
+import json
+import requests
+from flask import Flask, request, render_template, abort
+from datetime import datetime
+from itertools import zip_longest
+
+# ==============================================================================
+# --- 1. CONFIGURATION: UPDATE THESE VALUES ---
+# ==============================================================================
+
+# -- Pipedrive Configuration --
+
+# Replace with your actual Pipedrive API key.
+PIPEDRIVE_API_TOKEN = '6e737e4f78bff26687bd12190c8b5de2df87c08c'
+
+# Your company's unique domain in Pipedrive.
+PIPEDRIVE_COMPANY_DOMAIN = 'whitelabeliq' # e.g., 'whitelabeliq'
+
+# -- Webhook Configuration --
+# ACTION: Use a strong, secret token that you will also use in Fathom/Zapier.
+WEBHOOK_SECRET_TOKEN = 'sdfaksnfas' # e.g., 'sdfaksnfas'
+
+# *** NEW: Set the domain for internal users that should be ignored ***
+# Notes will NOT be added for any attendee with this in their email.
+EXCLUDED_DOMAIN = '@whitelabeliq.com'
+
+
+
+# -- Server & Logging Configuration --
+RAW_LOG_FILE = 'fathom_meeting_log.jsonl'
+# *** NEW: Define the name for the CSV log file of Pipedrive actions ***
+PIPEDRIVE_LOG_FILE = 'pipedrive_action_log.csv'
+
+app = Flask(__name__)
+
+# ==============================================================================
+# --- 2. LOGGING FUNCTION ---
+# ==============================================================================
+
+def log_action_to_csv(person_id, person_name, person_email, meeting_title):
+    """Appends a record of a successful Pipedrive action to a CSV file."""
+    print(f"CSV LOG: Recording action for {person_email}")
+    file_exists = os.path.isfile(PIPEDRIVE_LOG_FILE)
+    
+    try:
+        with open(PIPEDRIVE_LOG_FILE, 'a', newline='', encoding='utf-8') as csvfile:
+            fieldnames = ['timestamp', 'person_id', 'person_name', 'person_email', 'meeting_title']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+            if not file_exists:
+                writer.writeheader()  # Write header only if file is new
+            
+            writer.writerow({
+                'timestamp': datetime.now().isoformat(),
+                'person_id': person_id,
+                'person_name': person_name,
+                'person_email': person_email,
+                'meeting_title': meeting_title
+            })
+    except Exception as e:
+        print(f"CRITICAL ERROR: Could not write to CSV log file '{PIPEDRIVE_LOG_FILE}': {e}")
+
+
+# ==============================================================================
+# --- 3. PIPEDRIVE API FUNCTIONS (Updated) ---
+# ==============================================================================
+
+def find_person_details_by_email(email):
+    """
+    Searches for a person by email and returns their details (id, name, email) as a dict.
+    *** UPDATED to return a full dictionary instead of just the ID. ***
+    """
+    print(f"PIPEDRIVE: Searching for person with email: {email}")
+    url = f"https://{PIPEDRIVE_COMPANY_DOMAIN}.pipedrive.com/v1/persons/search"
+    params = {'term': email, 'fields': 'email', 'exact_match': True, 'api_token': PIPEDRIVE_API_TOKEN}
+    try:
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+        if data.get('data') and data['data'].get('items'):
+            person_data = data['data']['items'][0]['item']
+            person_id = person_data.get('id')
+            person_name = person_data.get('name')
+            if person_id:
+                print(f"PIPEDRIVE SUCCESS: Found Person '{person_name}' (ID: {person_id})")
+                return {'id': person_id, 'name': person_name, 'email': email}
+        print(f"PIPEDRIVE INFO: No person found with the email: {email}")
+        return None
+    except requests.exceptions.RequestException as e:
+        print(f"PIPEDRIVE API ERROR during search: {e}")
+        return None
+
+def add_note_to_person(person_id, note_content):
+    """
+    Adds a note to a Person and returns True on success.
+    *** UPDATED to return a boolean for success tracking. ***
+    """
+    print(f"PIPEDRIVE: Adding note to Person ID {person_id}")
+    url = f"https://{PIPEDRIVE_COMPANY_DOMAIN}.pipedrive.com/v1/notes"
+    params = {'api_token': PIPEDRIVE_API_TOKEN}
+    payload = {'content': note_content, 'person_id': person_id}
+    try:
+        response = requests.post(url, params=params, json=payload)
+        response.raise_for_status()
+        if response.json().get('success'):
+            print(f"PIPEDRIVE SUCCESS: Note was added to Person ID {person_id}.")
+            return True
+        else:
+            print(f"PIPEDRIVE ERROR: Failed to add note: {response.text}")
+            return False
+    except requests.exceptions.RequestException as e:
+        print(f"PIPEDRIVE API ERROR while adding note: {e}")
+        return False
+
+# ==============================================================================
+# --- 4. FLASK WEB SERVER (Updated Logic) ---
+# ==============================================================================
+
+def get_attendees_from_payload(payload):
+    """Parses invitee strings from the payload into a structured list."""
+    # This helper function remains the same
+    attendees_list = []
+    names_str = payload.get('invitees', '')
+    emails_str = payload.get('invitees_email', '')
+    if emails_str and isinstance(emails_str, str):
+        names = [name.strip() for name in names_str.split(',')]
+        emails = [email.strip() for email in emails_str.split(',')]
+        for name, email in zip_longest(names, emails, fillvalue=''):
+            if email:
+                attendees_list.append({'name': name, 'email': email})
+    return attendees_list
+
+@app.route('/webhook', methods=['POST'])
+def fathom_webhook_handler():
+    """
+    Catches webhook, logs it, adds a note to Pipedrive, and logs the action to CSV.
+    """
+    if request.args.get('token') != WEBHOOK_SECRET_TOKEN:
+        abort(403)
+
+    payload = request.json
+    if not payload: return 'Empty payload received', 400
+
+    print("\n--- NEW WEBHOOK RECEIVED ---")
+    
+    try:
+        raw_log_entry = {'received_at': datetime.now().isoformat(), 'payload': payload}
+        with open(RAW_LOG_FILE, 'a', encoding='utf-8') as f: f.write(json.dumps(raw_log_entry) + '\n')
+        print(f"WEBHOOK: Logged meeting: \"{payload.get('title', 'N/A')}\"")
+    except Exception as e:
+        print(f"SERVER CRITICAL ERROR: Could not write to log file: {e}")
+        return "Internal Server Error", 500
+
+    title = payload.get('title', 'Untitled Meeting')
+    recording_url = payload.get('recording_url')
+    attendees = get_attendees_from_payload(payload)
+    
+    if not attendees:
+        print("PIPEDRIVE INFO: No attendee emails found in payload.")
+        return 'Webhook received, but no attendee emails to process.', 200
+
+    # Construct note content
+    note_content = f"<h2>{title}</h2>"
+    if recording_url: note_content += f'<p><strong>Recording Link:</strong> <a href="{recording_url}" target="_blank">{recording_url}</a></p>'
+    note_content += "<h4>Attendees:</h4><ul>"
+    for attendee in attendees: note_content += f"<li>{attendee.get('name', 'N/A')} ({attendee.get('email')})</li>"
+    note_content += "</ul>"
+    
+    email_list = [p['email'] for p in attendees]
+    print(f"INTEGRATION: Found {len(email_list)} email(s). Starting Pipedrive process.")
+            
+    for email in email_list:
+        if EXCLUDED_DOMAIN in email:
+            print(f"INTEGRATION: Skipping internal email: {email}")
+            continue
+
+        # *** KEY CHANGE: Use the updated function and check the result ***
+        person_details = find_person_details_by_email(email)
+        
+        if person_details:
+            # Add the note and check if it was successful
+            note_added_successfully = add_note_to_person(person_details['id'], note_content)
+            
+            # If the note was added, log the action to our CSV file
+            if note_added_successfully:
+                log_action_to_csv(
+                    person_id=person_details['id'],
+                    person_name=person_details['name'],
+                    person_email=person_details['email'],
+                    meeting_title=title
+                )
+
+    print("--- WEBHOOK PROCESSING COMPLETE ---")
+    return 'Webhook received and processed successfully!', 200
+
+@app.route('/')
+def show_demo_page():
+    """Reads the Fathom log and renders the interactive demo page."""
+    # This function remains the same
+    meetings = []
+    if not os.path.exists(RAW_LOG_FILE):
+        return render_template('demo.html', meetings=meetings, error="Log file not found.")
+    try:
+        with open(RAW_LOG_FILE, 'r', encoding='utf-8') as f:
+            for i, line in enumerate(f):
+                log_entry = json.loads(line)
+                payload = log_entry.get('payload', {})
+                timestamp_iso = log_entry.get('received_at', '')
+                formatted_time = datetime.fromisoformat(timestamp_iso).strftime('%B %d, %Y at %I:%M %p') if timestamp_iso else 'N/A'
+                meetings.append({
+                    'id': i,
+                    'title': payload.get('title', 'No Title'),
+                    'summary': payload.get('summary', 'No summary available.'),
+                    'attendees': get_attendees_from_payload(payload),
+                    'recording_url': payload.get('recording_url'),
+                    'logged_at': formatted_time
+                })
+    except Exception as e:
+        return render_template('demo.html', meetings=[], error=f"Error reading log file: {e}")
+    return render_template('demo.html', meetings=reversed(meetings))
+
+# ==============================================================================
+# --- 5. MAIN EXECUTION ---
+# ==============================================================================
+if __name__ == '__main__':
+    if not os.path.exists('templates'): os.makedirs('templates')
+    print("Starting Fathom-Pipedrive Integration Server...")
+    app.run(host='0.0.0.0', port=5000, debug=False)

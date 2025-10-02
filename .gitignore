@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Environment & credentials
+.env
+.env.local
+.env.test
+.env.*.backup
+*.p8
+firebase-credentials.json
+
+# Test artifacts
+.tests/
+*.sqlite3
+
+# Logs
+*.log
+
+# Coverage / profiling
+.coverage
+htmlcov/
+.cache/
+
+# Misc
+*.db

@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fathom Meeting Dashboard</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        
+        :root {
+            --bg-color: #f8f9fa;
+            --card-bg: #ffffff;
+            --text-color: #212529;
+            --text-muted: #6c757d;
+            --primary-color: #4a90e2;
+            --border-color: #dee2e6;
+            --shadow: 0 4px 15px rgba(0, 0, 0, 0.07);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 20px auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        
+        header h1 {
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--text-color);
+            margin: 0;
+        }
+
+        header p {
+            font-size: 18px;
+            color: var(--text-muted);
+            margin-top: 5px;
+        }
+
+        .accordion-button {
+            background-color: var(--card-bg);
+            color: var(--text-color);
+            cursor: pointer;
+            padding: 20px 25px;
+            width: 100%;
+            text-align: left;
+            border: none;
+            border-radius: 8px;
+            outline: none;
+            transition: all 0.3s ease;
+            box-shadow: var(--shadow);
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .accordion-button:hover, .accordion-button.active {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+        }
+        
+        .accordion-button.active {
+            border-bottom-left-radius: 0;
+            border-bottom-right-radius: 0;
+            margin-bottom: 0;
+        }
+        
+        .meeting-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--primary-color);
+        }
+
+        .meeting-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px 20px;
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+        
+        .meta-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .meta-item a {
+            color: #007bff;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .meta-item a:hover { text-decoration: underline; }
+        
+        .attendees-preview {
+            font-size: 13px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .panel {
+            padding: 0 25px;
+            background-color: white;
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.4s ease-out;
+            border-bottom-left-radius: 8px;
+            border-bottom-right-radius: 8px;
+            box-shadow: var(--shadow);
+            margin-bottom: 15px;
+        }
+        
+        .panel-content {
+            padding: 25px 0;
+            border-top: 1px solid var(--border-color);
+        }
+        
+        .panel h4 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            color: var(--text-color);
+        }
+        
+        .panel .summary {
+            white-space: pre-wrap; /* Preserves newlines from the summary */
+            font-size: 15px;
+        }
+
+        .error, .no-meetings {
+            background-color: var(--card-bg);
+            text-align: center;
+            padding: 50px;
+            border-radius: 8px;
+            box-shadow: var(--shadow);
+            color: var(--text-muted);
+        }
+        .error { background-color: #ffebee; color: #c62828; }
+
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Fathom Meeting Dashboard</h1>
+            <p>Click on any meeting to view its AI summary.</p>
+        </header>
+
+        {% if error %}
+            <div class="error"><strong>Error:</strong> {{ error }}</div>
+        {% endif %}
+
+        <div class="accordion">
+            {% for meeting in meetings %}
+            <button class="accordion-button">
+                <div class="meeting-title">{{ meeting.title }}</div>
+                <div class="meeting-meta">
+                    <div class="meta-item">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                        <span>{{ meeting.logged_at }}</span>
+                    </div>
+                     {% if meeting.recording_url %}
+                    <div class="meta-item">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+                        <a href="{{ meeting.recording_url }}" target="_blank" onclick="event.stopPropagation()">View Recording</a>
+                    </div>
+                    {% endif %}
+                </div>
+                {% if meeting.attendees %}
+                <div class="attendees-preview">
+                    <strong>Attendees:</strong> 
+                    {{ meeting.attendees|map(attribute='name')|join(', ') }}
+                </div>
+                {% endif %}
+            </button>
+            <div class="panel">
+                <div class="panel-content">
+                    <h4>AI Meeting Summary</h4>
+                    <p class="summary">{{ meeting.summary }}</p>
+                </div>
+            </div>
+            {% else %}
+                <div class="no-meetings">
+                    <h3>Waiting for the first webhook...</h3>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <script>
+        const accordions = document.querySelectorAll(".accordion-button");
+
+        accordions.forEach(acc => {
+            acc.addEventListener("click", function() {
+                this.classList.toggle("active");
+                const panel = this.nextElementSibling;
+                if (panel.style.maxHeight) {
+                    panel.style.maxHeight = null;
+                } else {
+                    panel.style.maxHeight = panel.scrollHeight + "px";
+                }
+            });
+        });
+    </script>
+</body>
+</html>
